@@ -1,30 +1,10 @@
-Perfect — let’s build a **centralized logging system** in your `dvl/logHelper.py` that:
+Good catch — the issue is that in your current formatter, you’re replacing `record.levelname` with a colored string *before* it’s formatted, but when Python’s logging module copies or reuses records, the color codes may be lost or stripped. Also, `colorama` needs `colorama.init()` called once (we already do that), but you must print the color codes **directly into the formatted message** — not into `record.levelname`.
 
-✅ Always logs to console (with colors).
-✅ Optionally logs to file if `log_dir` is specified.
-✅ Defines custom levels: `COMMAND (17)`, `SYSTEM (19)`, `SUCCESS (25)`.
-✅ Uses `colorama` for coloring (no ANSI fallback, no typing module).
-✅ Automatically initializes when importing the `dvl` package (in `__init__.py`).
-✅ Includes the **calling module name** in the log format.
+Let’s fix that cleanly. 👇
 
 ---
 
-### 📁 Folder structure
-
-```
-stcol.py
-dvl/
-    __init__.py
-    logHelper.py
-    brocadeHelper.py
-    pmaxHelper.py
-    functionHelper.py
-    reportHelper.py
-```
-
----
-
-## 🧩 logHelper.py
+### ✅ Corrected `logHelper.py`
 
 ```python
 import logging
@@ -59,15 +39,17 @@ LOG_COLORS = {
 # === Custom Formatter ===
 class ColorFormatter(logging.Formatter):
     def format(self, record):
-        color = LOG_COLORS.get(record.levelname, "")
-        record.levelname = f"{color}{record.levelname}{Style.RESET_ALL}"
-
-        # Determine caller module name (one frame up)
+        # Determine caller module name
         frame = inspect.stack()[8] if len(inspect.stack()) > 8 else inspect.stack()[1]
         module = os.path.splitext(os.path.basename(frame.filename))[0]
 
-        record.module_name = module
-        return f"[{record.levelname}] [{record.module_name}] {record.getMessage()}"
+        color = LOG_COLORS.get(record.levelname, "")
+        reset = Style.RESET_ALL
+
+        # Build colored message directly
+        formatted = f"{color}[{record.levelname}] [{module}] {record.getMessage()}{reset}"
+        return formatted
+
 
 # === Logger creator ===
 def get_logger(name="dvl", level="INFO", log_dir=None):
@@ -94,7 +76,7 @@ def get_logger(name="dvl", level="INFO", log_dir=None):
             file_handler.setFormatter(file_formatter)
             logger.addHandler(file_handler)
 
-        # Add custom level methods
+        # Add custom level methods if not already added
         def command(self, msg, *args, **kwargs):
             if self.isEnabledFor(COMMAND_LEVEL):
                 self._log(COMMAND_LEVEL, msg, args, **kwargs)
@@ -116,40 +98,40 @@ def get_logger(name="dvl", level="INFO", log_dir=None):
 
 ---
 
-## 🧩 **init**.py
-
-Initialize the logger here so it’s available everywhere in the `dvl` package.
+### ✅ `__init__.py`
 
 ```python
 from .logHelper import get_logger
 
-# Initialize global package logger
+# Global package logger
 logger = get_logger(name="dvl", level="INFO", log_dir=None)
 ```
 
-Now, in any other module (like `brocadeHelper.py`), you can simply do:
+---
+
+### ✅ Example usage (e.g., `brocadeHelper.py`)
 
 ```python
 from . import logger
 
-logger.info("Starting Brocade operations...")
-logger.command("Executing command on switch...")
-logger.success("Operation completed successfully.")
-logger.system("System-level message.")
-logger.error("Something went wrong!")
+logger.debug("Debug message")
+logger.info("Information message")
+logger.command("Command executed")
+logger.system("System check running")
+logger.success("Operation successful")
+logger.warning("Warning condition")
+logger.error("Error occurred")
+logger.critical("Critical failure")
 ```
 
 ---
 
-## ✅ Features Recap
+### 💡 Why colors now appear:
 
-* **Custom levels** (`COMMAND`, `SYSTEM`, `SUCCESS`)
-* **Colorized console output** (colorama)
-* **Optional file output** (creates directory automatically)
-* **Auto-initialized shared logger** via `dvl/__init__.py`
-* **Includes calling module name** in logs
-* **Simple, dependency-light design**
+* We **don’t overwrite** `record.levelname` (logging internals reuse it elsewhere).
+* We **inject the color codes into the formatted message** instead.
+* `colorama`’s `init(autoreset=True)` ensures colors reset correctly on each log.
 
 ---
 
-Would you like the log format to also include timestamps or just `[LEVEL] [MODULE] message` as shown?
+Would you like the color scheme to be adjusted (e.g., darker magenta for COMMAND or bold green for SUCCESS)?
