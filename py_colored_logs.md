@@ -1,10 +1,17 @@
-Good catch — the issue is that in your current formatter, you’re replacing `record.levelname` with a colored string *before* it’s formatted, but when Python’s logging module copies or reuses records, the color codes may be lost or stripped. Also, `colorama` needs `colorama.init()` called once (we already do that), but you must print the color codes **directly into the formatted message** — not into `record.levelname`.
+Got it 👍 — you want the **standard console log format** (with timestamps, level, module, etc.) but still **colored output** per level — not the custom `"[LEVEL] [MODULE] message"` format.
 
-Let’s fix that cleanly. 👇
+Let’s keep the *regular console-style format*, like:
+
+```
+2025-10-27 18:31:04,822 - brocadeHelper - INFO - Message text
+```
+
+…but make it **colorized** by log level.
+File logs will stay plain (no color).
 
 ---
 
-### ✅ Corrected `logHelper.py`
+### ✅ Updated `dvl/logHelper.py`
 
 ```python
 import logging
@@ -36,19 +43,22 @@ LOG_COLORS = {
     "CRITICAL": Fore.RED + Style.BRIGHT,
 }
 
-# === Custom Formatter ===
+# === Custom Formatter (uses standard format) ===
 class ColorFormatter(logging.Formatter):
     def format(self, record):
-        # Determine caller module name
-        frame = inspect.stack()[8] if len(inspect.stack()) > 8 else inspect.stack()[1]
-        module = os.path.splitext(os.path.basename(frame.filename))[0]
-
         color = LOG_COLORS.get(record.levelname, "")
         reset = Style.RESET_ALL
 
-        # Build colored message directly
-        formatted = f"{color}[{record.levelname}] [{module}] {record.getMessage()}{reset}"
-        return formatted
+        # Get the module name of the original caller
+        frame = inspect.stack()[8] if len(inspect.stack()) > 8 else inspect.stack()[1]
+        module = os.path.splitext(os.path.basename(frame.filename))[0]
+        record.module = module
+
+        log_fmt = "%(asctime)s - %(module)s - %(levelname)s - %(message)s"
+        formatter = logging.Formatter(log_fmt, "%Y-%m-%d %H:%M:%S")
+
+        formatted = formatter.format(record)
+        return f"{color}{formatted}{reset}"
 
 
 # === Logger creator ===
@@ -65,13 +75,14 @@ def get_logger(name="dvl", level="INFO", log_dir=None):
         console_handler.setFormatter(ColorFormatter())
         logger.addHandler(console_handler)
 
-        # Optional file handler
+        # Optional file handler (plain format)
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
             file_path = os.path.join(log_dir, f"{name}.log")
             file_handler = logging.FileHandler(file_path, encoding="utf-8")
             file_formatter = logging.Formatter(
-                "[%(levelname)s] [%(module)s] %(message)s"
+                "%(asctime)s - %(module)s - %(levelname)s - %(message)s",
+                "%Y-%m-%d %H:%M:%S",
             )
             file_handler.setFormatter(file_formatter)
             logger.addHandler(file_handler)
@@ -98,18 +109,18 @@ def get_logger(name="dvl", level="INFO", log_dir=None):
 
 ---
 
-### ✅ `__init__.py`
+### ✅ `dvl/__init__.py`
 
 ```python
 from .logHelper import get_logger
 
-# Global package logger
+# Initialize shared package logger
 logger = get_logger(name="dvl", level="INFO", log_dir=None)
 ```
 
 ---
 
-### ✅ Example usage (e.g., `brocadeHelper.py`)
+### ✅ Example (`brocadeHelper.py`)
 
 ```python
 from . import logger
@@ -126,12 +137,17 @@ logger.critical("Critical failure")
 
 ---
 
-### 💡 Why colors now appear:
+### ✅ Example Output (console)
 
-* We **don’t overwrite** `record.levelname` (logging internals reuse it elsewhere).
-* We **inject the color codes into the formatted message** instead.
-* `colorama`’s `init(autoreset=True)` ensures colors reset correctly on each log.
+```
+2025-10-27 19:10:12 - brocadeHelper - INFO - Information message
+2025-10-27 19:10:12 - brocadeHelper - COMMAND - Command executed
+2025-10-27 19:10:12 - brocadeHelper - SUCCESS - Operation successful
+2025-10-27 19:10:12 - brocadeHelper - ERROR - Error occurred
+```
+
+Each line will be **colored** appropriately (green for success, magenta for command, etc.), while the **file logs remain uncolored** and use the same timestamped format.
 
 ---
 
-Would you like the color scheme to be adjusted (e.g., darker magenta for COMMAND or bold green for SUCCESS)?
+Would you like the color mapping adjusted (for example, brighter blue for SYSTEM or bold green for SUCCESS)?
